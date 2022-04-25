@@ -40,10 +40,10 @@ env.key_filename = conf.get("SSH_KEY_PATH", None)
 env.hosts = conf.get("HOSTS", [""])
 
 env.proj_name = conf.get("PROJECT_NAME", os.getcwd().split(os.sep)[-1])
-env.venv_home = conf.get("VIRTUALENV_HOME", "/home/%s" % env.user)
-env.venv_path = "%s/%s" % (env.venv_home, env.proj_name)
+env.venv_home = conf.get("VIRTUALENV_HOME", f"/home/{env.user}")
+env.venv_path = f"{env.venv_home}/{env.proj_name}"
 env.proj_dirname = "project"
-env.proj_path = "%s/%s" % (env.venv_path, env.proj_dirname)
+env.proj_path = f"{env.venv_path}/{env.proj_dirname}"
 env.manage = "%s/bin/python %s/project/manage.py" % ((env.venv_path,) * 2)
 env.domains = conf.get("DOMAINS", [conf.get("LIVE_HOSTNAME", env.hosts[0])])
 env.domains_nginx = " ".join(env.domains)
@@ -105,7 +105,7 @@ def virtualenv():
     Runs commands within the project's virtualenv.
     """
     with cd(env.venv_path):
-        with prefix("source %s/bin/activate" % env.venv_path):
+        with prefix(f"source {env.venv_path}/bin/activate"):
             yield
 
 
@@ -126,7 +126,7 @@ def update_changed_requirements():
     and gets new requirements if changes have occurred.
     """
     reqs_path = join(env.proj_path, env.reqs_path)
-    get_reqs = lambda: run("cat %s" % reqs_path, show=False)
+    get_reqs = lambda: run(f"cat {reqs_path}", show=False)
     old_reqs = get_reqs() if env.reqs_path else ""
     yield
     if old_reqs:
@@ -145,7 +145,7 @@ def update_changed_requirements():
             else:
                 # All requirements are pinned.
                 return
-        pip("-r %s/%s" % (env.proj_path, env.reqs_path))
+        pip(f"-r {env.proj_path}/{env.reqs_path}")
 
 
 ###########################################
@@ -199,10 +199,10 @@ def get_templates():
     """
     Returns each of the templates with env vars injected.
     """
-    injected = {}
-    for name, data in templates.items():
-        injected[name] = dict([(k, v % env) for k, v in data.items()])
-    return injected
+    return {
+        name: dict([(k, v % env) for k, v in data.items()])
+        for name, data in templates.items()
+    }
 
 
 def upload_template_and_reload(name):
@@ -222,7 +222,7 @@ def upload_template_and_reload(name):
     remote_data = ""
     if exists(remote_path):
         with hide("stdout"):
-            remote_data = sudo("cat %s" % remote_path, show=False)
+            remote_data = sudo(f"cat {remote_path}", show=False)
     with open(local_path, "r") as f:
         local_data = f.read()
         # Escape all non-string-formatting-placeholder occurrences of '%':
@@ -235,9 +235,9 @@ def upload_template_and_reload(name):
         return
     upload_template(local_path, remote_path, env, use_sudo=True, backup=False)
     if owner:
-        sudo("chown %s %s" % (owner, remote_path))
+        sudo(f"chown {owner} {remote_path}")
     if mode:
-        sudo("chmod %s %s" % (mode, remote_path))
+        sudo(f"chmod {mode} {remote_path}")
     if reload_command:
         sudo(reload_command)
 
@@ -256,7 +256,7 @@ def apt(packages):
     """
     Installs one or more system packages via apt.
     """
-    return sudo("apt-get install -y -q " + packages)
+    return sudo(f"apt-get install -y -q {packages}")
 
 
 @task
@@ -265,7 +265,7 @@ def pip(packages):
     Installs one or more Python packages within the virtual environment.
     """
     with virtualenv():
-        return sudo("pip install %s" % packages)
+        return sudo(f"pip install {packages}")
 
 
 def postgres(command):
@@ -273,7 +273,7 @@ def postgres(command):
     Runs the given command as the postgres user.
     """
     show = not command.startswith("psql")
-    return run("sudo -u root sudo -u postgres %s" % command, show=show)
+    return run(f"sudo -u root sudo -u postgres {command}", show=show)
 
 
 @task
@@ -292,7 +292,7 @@ def backup(filename):
     """
     Backs up the database.
     """
-    return postgres("pg_dump -Fc %s > %s" % (env.proj_name, filename))
+    return postgres(f"pg_dump -Fc {env.proj_name} > {filename}")
 
 
 @task
@@ -300,7 +300,7 @@ def restore(filename):
     """
     Restores the database.
     """
-    return postgres("pg_restore -c -d %s %s" % (env.proj_name, filename))
+    return postgres(f"pg_restore -c -d {env.proj_name} {filename}")
 
 
 @task
@@ -330,7 +330,7 @@ def manage(command):
     """
     Runs a Django management command.
     """
-    return run("%s %s" % (env.manage, command))
+    return run(f"{env.manage} {command}")
 
 
 #########################
@@ -343,10 +343,10 @@ def install():
     """
     Installs the base system and Python requirements for the entire server.
     """
-    locale = "LC_ALL=%s" % env.locale
+    locale = f"LC_ALL={env.locale}"
     with hide("stdout"):
         if locale not in sudo("cat /etc/default/locale"):
-            sudo("update-locale %s" % locale)
+            sudo(f"update-locale {locale}")
             run("exit")
     sudo("apt-get update -y -q")
     apt("nginx libjpeg-dev python-dev python-setuptools git-core "
@@ -375,9 +375,9 @@ def create():
                 print("\nAborting!")
                 return False
             remove()
-        run("virtualenv %s --distribute" % env.proj_name)
+        run(f"virtualenv {env.proj_name} --distribute")
         vcs = "git" if env.git else "hg"
-        run("%s clone %s %s" % (vcs, env.repo_url, env.proj_path))
+        run(f"{vcs} clone {env.repo_url} {env.proj_path}")
 
     # Create DB and DB user.
     pw = db_pass()
@@ -394,10 +394,10 @@ def create():
     if not env.ssl_disabled:
         conf_path = "/etc/nginx/conf"
         if not exists(conf_path):
-            sudo("mkdir %s" % conf_path)
+            sudo(f"mkdir {conf_path}")
         with cd(conf_path):
-            crt_file = env.proj_name + ".crt"
-            key_file = env.proj_name + ".key"
+            crt_file = f"{env.proj_name}.crt"
+            key_file = f"{env.proj_name}.key"
             if not exists(crt_file) and not exists(key_file):
                 try:
                     crt_local, = glob(join("deploy", "*.crt"))
@@ -414,7 +414,7 @@ def create():
     upload_template_and_reload("settings")
     with project():
         if env.reqs_path:
-            pip("-r %s/%s" % (env.proj_path, env.reqs_path))
+            pip(f"-r {env.proj_path}/{env.reqs_path}")
         pip("gunicorn setproctitle south psycopg2 "
             "django-compressor python-memcached")
         manage("createdb --noinput --nodata")
@@ -447,13 +447,13 @@ def remove():
     Blow away the current project.
     """
     if exists(env.venv_path):
-        sudo("rm -rf %s" % env.venv_path)
+        sudo(f"rm -rf {env.venv_path}")
     for template in get_templates().values():
         remote_path = template["remote_path"]
         if exists(remote_path):
-            sudo("rm %s" % remote_path)
-    psql("DROP DATABASE IF EXISTS %s;" % env.proj_name)
-    psql("DROP USER IF EXISTS %s;" % env.proj_name)
+            sudo(f"rm {remote_path}")
+    psql(f"DROP DATABASE IF EXISTS {env.proj_name};")
+    psql(f"DROP USER IF EXISTS {env.proj_name};")
 
 
 ##############
@@ -466,9 +466,9 @@ def restart():
     """
     Restart gunicorn worker processes for the project.
     """
-    pid_path = "%s/gunicorn.pid" % env.proj_path
+    pid_path = f"{env.proj_path}/gunicorn.pid"
     if exists(pid_path):
-        sudo("kill -HUP `cat %s`" % pid_path)
+        sudo(f"kill -HUP `cat {pid_path}`")
     else:
         start_args = (env.proj_name, env.proj_name)
         sudo("supervisorctl start %s:gunicorn_%s" % start_args)
@@ -498,10 +498,10 @@ def deploy():
         backup("last.db")
         static_dir = static()
         if exists(static_dir):
-            run("tar -cf last.tar %s" % static_dir)
+            run(f"tar -cf last.tar {static_dir}")
         git = env.git
         last_commit = "git rev-parse HEAD" if git else "hg id -i"
-        run("%s > last.commit" % last_commit)
+        run(f"{last_commit} > last.commit")
         with update_changed_requirements():
             run("git pull origin master -f" if git else "hg pull && hg up -C")
         manage("collectstatic -v 0 --noinput")
@@ -524,9 +524,9 @@ def rollback():
     with project():
         with update_changed_requirements():
             update = "git checkout" if env.git else "hg up -C"
-            run("%s `cat last.commit`" % update)
+            run(f"{update} `cat last.commit`")
         with cd(join(static(), "..")):
-            run("tar -xf %s" % join(env.proj_path, "last.tar"))
+            run(f'tar -xf {join(env.proj_path, "last.tar")}')
         restore("last.db")
     restart()
 
